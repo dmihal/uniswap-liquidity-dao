@@ -49,6 +49,22 @@ describe('MetaPools', function() {
       expect(await metaPool.currentPool()).to.equal(uniswapPool.address);
       expect(await metaPool.token0()).to.equal(token0.address);
       expect(await metaPool.token1()).to.equal(token1.address);
+      expect(await metaPool.currentLowerTick()).to.equal(-8388608);
+      expect(await metaPool.currentUpperTick()).to.equal(8388607);
+      expect(await metaPool.currentUniswapFee()).to.equal(3000);
+    });
+
+    it('Should fail to create a metapool if there is no Uniswap 0.3% pool', async function() {
+      await expect(
+        metaPoolFactory.createPool(token0.address, nonExistantToken)
+      ).to.be.reverted;
+    });
+
+    it('Should fail to create the same pool twice', async function() {
+      await metaPoolFactory.createPool(token0.address, token1.address);
+      await expect(
+        metaPoolFactory.createPool(token0.address, token1.address)
+      ).to.be.reverted;
     });
   });
 });

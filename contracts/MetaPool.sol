@@ -40,8 +40,14 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
 
     currentLowerTick = type(int24).min;
     currentUpperTick = type(int24).max;
+    nextLowerTick = type(int24).min;
+    nextUpperTick = type(int24).max;
     currentUniswapFee = DEFAULT_UNISWAP_FEE;
-    currentPool = IUniswapV3Pool(IUniswapV3Factory(_uniswapFactory).getPool(_token0, _token1, DEFAULT_UNISWAP_FEE));
+    nextUniswapFee = DEFAULT_UNISWAP_FEE;
+
+    address uniswapPool = IUniswapV3Factory(_uniswapFactory).getPool(_token0, _token1, DEFAULT_UNISWAP_FEE);
+    require(uniswapPool != address(0));
+    currentPool = IUniswapV3Pool(uniswapPool);
   }
 
   function mint(uint128 newLiquidity) external returns (uint256 mintAmount) {
@@ -137,7 +143,7 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
     );
 
     // If we're swapping pools
-    if (currentUniswapFee != nextUniswapFee) {
+    if (_currentUniswapFee != _nextUniswapFee) {
       _currentPool.burn(_currentLowerTick, _currentUpperTick, _liquidity);
 
       IUniswapV3Pool newPool = IUniswapV3Pool(uniswapFactory.getPool(token0, token1, _nextUniswapFee));

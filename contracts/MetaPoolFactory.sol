@@ -7,8 +7,6 @@ import { IMetaPoolFactory } from "./interfaces/IMetaPoolFactory.sol";
 import { MetaPool } from "./MetaPool.sol";
 
 contract MetaPoolFactory is IMetaPoolFactory {
-  address public owner;
-
   address private _token0;
   address private _token1;
 
