@@ -1,4 +1,24 @@
 const { expect } = require('chai');
+const bn = require('bignumber.js');
+
+bn.config({ EXPONENTIAL_AT: 999999, DECIMAL_PLACES: 40 })
+
+// returns the sqrt price as a 64x96
+function encodePriceSqrt(reserve1, reserve0) {
+  return new bn(reserve1.toString())
+    .div(reserve0.toString())
+    .sqrt()
+    .multipliedBy(new bn(2).pow(96))
+    .integerValue(3)
+    .toString()
+}
+
+function position(address, lowerTick, upperTick) {
+  return ethers.utils.solidityKeccak256(
+    ['address', 'int24', 'int24'],
+    [address, lowerTick, upperTick],
+  );
+}
 
 describe('MetaPools', function() {
   let uniswapFactory;
@@ -7,6 +27,15 @@ describe('MetaPools', function() {
   let token1;
   let metaPoolFactory;
   const nonExistantToken = '0x1111111111111111111111111111111111111111';
+  let user0;
+  let swapTest;
+
+  before(async function() {
+    ([user0] = await ethers.getSigners());
+    
+    const SwapTest = await ethers.getContractFactory('SwapTest');
+    swapTest = await SwapTest.deploy();
+  })
 
   beforeEach(async function() {
     const UniswapV3Factory = await ethers.getContractFactory('UniswapV3Factory');
@@ -20,6 +49,9 @@ describe('MetaPools', function() {
     token0 = await MockERC20.deploy();
     token1 = await MockERC20.deploy();
 
+    await token0.approve(swapTest.address, ethers.utils.parseEther('10000000000000'));
+    await token1.approve(swapTest.address, ethers.utils.parseEther('10000000000000'));
+
     // Sort token0 & token1 so it follows the same order as Uniswap & the MetaPoolFactory
     if (ethers.BigNumber.from(token0.address).gt(ethers.BigNumber.from(token1.address))) {
       const tmp = token0;
@@ -30,6 +62,7 @@ describe('MetaPools', function() {
     await uniswapFactory.createPool(token0.address, token1.address, '3000');
     const uniswapPoolAddress = await uniswapFactory.getPool(token0.address, token1.address, '3000');
     uniswapPool = await ethers.getContractAt('IUniswapV3Pool', uniswapPoolAddress);
+    await uniswapPool.initialize(encodePriceSqrt('1', '1'));
   });
 
   describe('MetaPoolFactory', async function() {
@@ -49,8 +82,8 @@ describe('MetaPools', function() {
       expect(await metaPool.currentPool()).to.equal(uniswapPool.address);
       expect(await metaPool.token0()).to.equal(token0.address);
       expect(await metaPool.token1()).to.equal(token1.address);
-      expect(await metaPool.currentLowerTick()).to.equal(-8388608);
-      expect(await metaPool.currentUpperTick()).to.equal(8388607);
+      expect(await metaPool.currentLowerTick()).to.equal(-887220);
+      expect(await metaPool.currentUpperTick()).to.equal(887220);
       expect(await metaPool.currentUniswapFee()).to.equal(3000);
     });
 
@@ -65,6 +98,79 @@ describe('MetaPools', function() {
       await expect(
         metaPoolFactory.createPool(token0.address, token1.address)
       ).to.be.reverted;
+    });
+  });
+
+  describe('MetaPool', function() {
+    let metaPool;
+
+    beforeEach(async function() {
+      await metaPoolFactory.createPool(token0.address, token1.address);
+      const calculatedAddress = await metaPoolFactory.calculatePoolAddress(token0.address, token1.address);
+      metaPool = await ethers.getContractAt('MetaPool', calculatedAddress);
+
+      await token0.approve(calculatedAddress, ethers.utils.parseEther('1000000'));
+      await token1.approve(calculatedAddress, ethers.utils.parseEther('1000000'));
+    });
+
+    describe('deposits', function() {
+      it('Should deposit funds into a metapool', async function() {
+        await metaPool.mint('1000');
+
+        expect(await token0.balanceOf(uniswapPool.address)).to.equal('1000');
+        expect(await token1.balanceOf(uniswapPool.address)).to.equal('1000');
+        const [liquidity] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+        expect(liquidity).to.equal('1000');
+        expect(await metaPool.totalSupply()).to.equal('1000');
+        expect(await metaPool.balanceOf(await user0.getAddress())).to.equal('1000');
+
+        await metaPool.mint('500');
+
+        expect(await token0.balanceOf(uniswapPool.address)).to.equal('1500');
+        expect(await token1.balanceOf(uniswapPool.address)).to.equal('1500');
+        const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+        expect(liquidity2).to.equal('1500');
+        expect(await metaPool.totalSupply()).to.equal('1500');
+        expect(await metaPool.balanceOf(await user0.getAddress())).to.equal('1500');
+      });
+    });
+
+    describe('with liquidity depositted', function() {
+      beforeEach(async function() {
+        await metaPool.mint('10000');
+      });
+
+      describe('withdrawal', function() {
+        it('should burn LP tokens and withdraw funds', async function() {
+          await metaPool.burn('6000');
+
+          expect(await token0.balanceOf(uniswapPool.address)).to.equal('4001');
+          expect(await token1.balanceOf(uniswapPool.address)).to.equal('4001');
+          const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+          expect(liquidity2).to.equal('4000');
+          expect(await metaPool.totalSupply()).to.equal('4000');
+          expect(await metaPool.balanceOf(await user0.getAddress())).to.equal('4000');
+        });
+      });
+
+      describe('after lots of balanced trading', function() {
+        beforeEach(async function() {
+          for (let i = 0; i < 200; i += 1) {
+            await swapTest.swap(uniswapPool.address, i % 2, '1000');
+          }
+        });
+
+        describe('rebalance', function() {
+          it('should redeposit fees with a rebalance', async function() {
+            await metaPool.rebalance();
+
+            expect(await token0.balanceOf(uniswapPool.address)).to.equal('10200');
+            expect(await token1.balanceOf(uniswapPool.address)).to.equal('10200');
+            const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidity2).to.equal('10099');
+          });
+        });
+      });
     });
   });
 });

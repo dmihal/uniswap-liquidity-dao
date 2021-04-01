@@ -5,11 +5,15 @@ import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3
 import { IUniswapV3Factory } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import { IUniswapV3MintCallback } from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
 import { LowGasSafeMath } from "@uniswap/v3-core/contracts/libraries/LowGasSafeMath.sol";
+import { IUniswapV3SwapCallback } from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
+import { TickMath } from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+
 import { IMetaPoolFactory } from "./interfaces/IMetaPoolFactory.sol";
 import { TransferHelper } from "./libraries/TransferHelper.sol";
+import { LiquidityAmounts } from "./libraries/LiquidityAmounts.sol";
 import { ERC20 } from "./ERC20.sol";
 
-contract MetaPool is IUniswapV3MintCallback, ERC20 {
+contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
   using LowGasSafeMath for uint256;
 
   IMetaPoolFactory public immutable factory;
@@ -28,6 +32,8 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
   IUniswapV3Factory public immutable uniswapFactory;
 
   uint24 private constant DEFAULT_UNISWAP_FEE = 3000;
+  int24 private constant MIN_TICK = -887220;
+  int24 private constant MAX_TICK = 887220;
 
   constructor() {
     IMetaPoolFactory _factory = IMetaPoolFactory(msg.sender);
@@ -38,10 +44,10 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
     token1 = _token1;
     uniswapFactory = IUniswapV3Factory(_uniswapFactory);
 
-    currentLowerTick = type(int24).min;
-    currentUpperTick = type(int24).max;
-    nextLowerTick = type(int24).min;
-    nextUpperTick = type(int24).max;
+    currentLowerTick = MIN_TICK;
+    currentUpperTick = MAX_TICK;
+    nextLowerTick = MIN_TICK;
+    nextUpperTick = MAX_TICK;
     currentUniswapFee = DEFAULT_UNISWAP_FEE;
     nextUniswapFee = DEFAULT_UNISWAP_FEE;
 
@@ -54,16 +60,16 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
     (int24 _currentLowerTick, int24 _currentUpperTick) = (currentLowerTick, currentUpperTick);
     IUniswapV3Pool _currentPool = currentPool;
 
+    bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
+    (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
+
     _currentPool.mint(
       address(this),
       _currentLowerTick,
       _currentUpperTick,
       newLiquidity,
-      abi.encodePacked(msg.sender)
+      abi.encode(msg.sender)
     );
-
-    bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
-    (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
 
     uint256 _totalSupply = totalSupply;
     if (_totalSupply == 0) {
@@ -122,29 +128,12 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
       nextUpperTick,
       nextUniswapFee
     );
-    bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
-
-    _currentPool.burn(_currentLowerTick, _currentUpperTick, 0);
-    (
-      uint128 _liquidity,
-      /*uint256 feeGrowthInside0LastX128*/,
-      /*uint256 feeGrowthInside1LastX128*/,
-      uint128 tokensOwed0,
-      uint128 tokensOwed1
-    ) = _currentPool.positions(positionID);
-
-    // Collect fees
-    _currentPool.collect(
-      address(this),
-      _currentLowerTick,
-      _currentUpperTick,
-      tokensOwed0,
-      tokensOwed1
-    );
 
     // If we're swapping pools
     if (_currentUniswapFee != _nextUniswapFee) {
-      _currentPool.burn(_currentLowerTick, _currentUpperTick, _liquidity);
+      bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
+      (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
+      (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, _liquidity, address(this));
 
       IUniswapV3Pool newPool = IUniswapV3Pool(uniswapFactory.getPool(token0, token1, _nextUniswapFee));
       (
@@ -159,14 +148,117 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
         newPool
       );
 
-      // deposit(newPool, );
+      deposit(newPool, _nextLowerTick, _nextUpperTick, collected0, collected1);
     } else if (_currentLowerTick != _nextLowerTick || _currentUpperTick != _nextUpperTick) {
-      _currentPool.burn(_currentLowerTick, _currentUpperTick, _liquidity);
+      bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
+      (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
+      (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, _liquidity, address(this));
+      
       (currentLowerTick, currentUpperTick) = (_nextLowerTick, _nextUpperTick);
-      // deposit(currentPool, );
+      
+      deposit(_currentPool, _nextLowerTick, _nextUpperTick, collected0, collected1);
     } else {
-      // deposit(currentPool, );
+      (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, 0, address(this));
+      deposit(_currentPool, _currentLowerTick, _currentUpperTick, collected0, collected1);
     }
+  }
+
+  function deposit(
+    IUniswapV3Pool _currentPool,
+    int24 lowerTick,
+    int24 upperTick,
+    uint256 amount0,
+    uint256 amount1
+  ) private {
+    (uint160 sqrtRatioX96,,,,,,) = _currentPool.slot0();
+
+console.log(amount0);
+console.log(amount1);
+    // First, deposit as much as we can
+    uint128 baseLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+      sqrtRatioX96,
+      TickMath.getSqrtRatioAtTick(lowerTick),
+      TickMath.getSqrtRatioAtTick(upperTick),
+      amount0,
+      amount1
+    );
+    (uint256 amountDeposited0, uint256 amountDeposited1) = _currentPool.mint(
+      address(this),
+      lowerTick,
+      upperTick,
+      baseLiquidity,
+      abi.encode(address(this))
+    );
+    amount0 -= amountDeposited0;
+    amount1 -= amountDeposited1;
+
+console.log(amount0);
+console.log(amount1);
+
+    if (amount0 > 0 || amount1 > 0) {
+      // TODO: this is a hacky method that only works at somewhat-balanced pools
+      bool zeroForOne = amount0 > amount1;
+      (int256 amount0Delta, int256 amount1Delta) = _currentPool.swap(
+        address(this),
+        zeroForOne,
+        int256(zeroForOne ? amount0 : amount1),
+        zeroForOne ? sqrtRatioX96 - 1 : sqrtRatioX96 + 1,
+        abi.encode(address(this))
+      );
+
+      amount0 = uint256(int256(amount0) + amount0Delta);
+      amount1 = uint256(int256(amount1) + amount1Delta);
+
+      // Add liquidity a second time
+      uint128 swapLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+        sqrtRatioX96,
+        TickMath.getSqrtRatioAtTick(lowerTick),
+        TickMath.getSqrtRatioAtTick(upperTick),
+        amount0,
+        amount1
+      );
+console.logInt(amount0Delta);
+console.logInt(amount1Delta);
+
+console.log(swapLiquidity);
+      _currentPool.mint(
+        address(this),
+        lowerTick,
+        upperTick,
+        swapLiquidity,
+        abi.encode(address(this))
+      );
+console.log('c');
+    }
+  }
+
+  function withdraw(
+    IUniswapV3Pool _currentPool,
+    int24 lowerTick,
+    int24 upperTick,
+    uint128 liquidity,
+    address recipient
+  ) private returns (uint256 collected0, uint256 collected1) {
+      // We can request MAX_INT, and Uniswap will just give whatever we're owed
+    uint128 requestAmount0 = type(uint128).max;
+    uint128 requestAmount1 = type(uint128).max;
+
+    (uint256 _owed0, uint256 _owed1) = _currentPool.burn(lowerTick, upperTick, liquidity);
+
+    if (recipient != address(this)) {
+      // TODO: can we trust Uniswap and safely cast here?
+      requestAmount0 = uint128(_owed0);
+      requestAmount1 = uint128(_owed1);
+    }
+
+    // Collect all owed
+    (collected0, collected1) = _currentPool.collect(
+      recipient,
+      lowerTick,
+      upperTick,
+      requestAmount0,
+      requestAmount1
+    );
   }
 
   function uniswapV3MintCallback(
@@ -177,13 +269,35 @@ contract MetaPool is IUniswapV3MintCallback, ERC20 {
     require(msg.sender == address(currentPool));
 
     (address sender) = abi.decode(data, (address));
-    
+
     if (sender == address(this)) {
-      TransferHelper.safeTransfer(token0, msg.sender, amount0Owed);
-      TransferHelper.safeTransfer(token1, msg.sender, amount1Owed);
+      if (amount0Owed > 0) {
+        TransferHelper.safeTransfer(token0, msg.sender, amount0Owed);
+      }
+      if (amount1Owed > 0) {
+        TransferHelper.safeTransfer(token1, msg.sender, amount1Owed);
+      }
     } else {
-      TransferHelper.safeTransferFrom(token0, sender, msg.sender, amount0Owed);
-      TransferHelper.safeTransferFrom(token1, sender, msg.sender, amount1Owed);
+      if (amount0Owed > 0) {
+        TransferHelper.safeTransferFrom(token0, sender, msg.sender, amount0Owed);
+      }
+      if (amount1Owed > 0) {
+        TransferHelper.safeTransferFrom(token1, sender, msg.sender, amount1Owed);
+      }
+    }
+  }
+
+  function uniswapV3SwapCallback(
+    int256 amount0Delta,
+    int256 amount1Delta,
+    bytes calldata /*data*/
+  ) external override {
+    require(msg.sender == address(currentPool));
+
+    if (amount0Delta > 0) {
+      TransferHelper.safeTransfer(token0, msg.sender, uint256(amount0Delta));
+    } else if (amount1Delta > 0) {
+      TransferHelper.safeTransfer(token1, msg.sender, uint256(amount1Delta));
     }
   }
 }

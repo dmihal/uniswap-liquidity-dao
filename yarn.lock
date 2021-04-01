@@ -456,6 +456,11 @@
     "@types/sinon-chai" "^3.2.3"
     "@types/web3" "1.0.19"
 
+"@openzeppelin/contracts@3.4.1-solc-0.7-2":
+  version "3.4.1-solc-0.7-2"
+  resolved "https://registry.yarnpkg.com/@openzeppelin/contracts/-/contracts-3.4.1-solc-0.7-2.tgz#371c67ebffe50f551c3146a9eec5fe6ffe862e92"
+  integrity sha512-tAG9LWg8+M2CMu7hIsqHPaTyG4uDzjr6mhvH96LvOpLZZj6tgzTluBt+LsCf1/QaYrlis6pITvpIaIhE+iZB+Q==
+
 "@resolver-engine/core@^0.3.3":
   version "0.3.3"
   resolved "https://registry.yarnpkg.com/@resolver-engine/core/-/core-0.3.3.tgz#590f77d85d45bc7ecc4e06c654f41345db6ca967"
@@ -697,6 +702,14 @@
   version "1.0.0-rc.0"
   resolved "https://registry.yarnpkg.com/@uniswap/v3-core/-/v3-core-1.0.0-rc.0.tgz#eee325b11ab423b5e77af1ae6e9aec89fa51d7c5"
   integrity sha512-nMmAtXtU1B3pOsP1DMMBO4/CUwPlatVhPKoos1l8KvVKCO9wP+trMR/heYmcwILJVF4Em5EqUBvx6Jzd8oagAg==
+
+"@uniswap/v3-periphery@^1.0.0-beta.11":
+  version "1.0.0-beta.11"
+  resolved "https://registry.yarnpkg.com/@uniswap/v3-periphery/-/v3-periphery-1.0.0-beta.11.tgz#5068eed1cafa591ebb69ee4e990b4ca38de602be"
+  integrity sha512-/jUNxj+/oH9TDbXv4acJc4G4xLydYJnsFc5W+fYvPTMR89PT3RLXWYK8o8FaEr/2uDxnycjXfovHb1tgB/kgtg==
+  dependencies:
+    "@openzeppelin/contracts" "3.4.1-solc-0.7-2"
+    "@uniswap/v3-core" "^1.0.0-rc.0"
 
 "@yarnpkg/lockfile@^1.1.0":
   version "1.1.0"
