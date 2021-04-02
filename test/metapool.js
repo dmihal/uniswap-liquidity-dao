@@ -155,9 +155,8 @@ describe('MetaPools', function() {
 
       describe('after lots of balanced trading', function() {
         beforeEach(async function() {
-          for (let i = 0; i < 200; i += 1) {
-            await swapTest.swap(uniswapPool.address, i % 2, '1000');
-          }
+          await swapTest.washTrade(uniswapPool.address, '1000', 100, 2);
+          await swapTest.washTrade(uniswapPool.address, '1000', 100, 2);
         });
 
         describe('rebalance', function() {
@@ -168,6 +167,26 @@ describe('MetaPools', function() {
             expect(await token1.balanceOf(uniswapPool.address)).to.equal('10200');
             const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
             expect(liquidity2).to.equal('10099');
+          });
+        });
+      });
+
+      describe('after lots of unbalanced trading', function() {
+        beforeEach(async function() {
+          await swapTest.washTrade(uniswapPool.address, '1000', 100, 4);
+          await swapTest.washTrade(uniswapPool.address, '1000', 100, 4);
+        });
+
+        describe('rebalance', function() {
+          it('should redeposit fees with a rebalance', async function() {
+            await metaPool.rebalance();
+
+            expect(await token0.balanceOf(uniswapPool.address)).to.equal('10299');
+            expect(await token1.balanceOf(uniswapPool.address)).to.equal('10100');
+            expect(await token0.balanceOf(metaPool.address)).to.equal('1');
+            expect(await token1.balanceOf(metaPool.address)).to.equal('0');
+            const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidity2).to.equal('10097');
           });
         });
       });

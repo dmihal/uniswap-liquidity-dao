@@ -172,8 +172,6 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
   ) private {
     (uint160 sqrtRatioX96,,,,,,) = _currentPool.slot0();
 
-console.log(amount0);
-console.log(amount1);
     // First, deposit as much as we can
     uint128 baseLiquidity = LiquidityAmounts.getLiquidityForAmounts(
       sqrtRatioX96,
@@ -192,24 +190,22 @@ console.log(amount1);
     amount0 -= amountDeposited0;
     amount1 -= amountDeposited1;
 
-console.log(amount0);
-console.log(amount1);
-
     if (amount0 > 0 || amount1 > 0) {
       // TODO: this is a hacky method that only works at somewhat-balanced pools
       bool zeroForOne = amount0 > amount1;
       (int256 amount0Delta, int256 amount1Delta) = _currentPool.swap(
         address(this),
         zeroForOne,
-        int256(zeroForOne ? amount0 : amount1),
-        zeroForOne ? sqrtRatioX96 - 1 : sqrtRatioX96 + 1,
+        int256(zeroForOne ? amount0 : amount1) / 2,
+        zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
         abi.encode(address(this))
       );
 
-      amount0 = uint256(int256(amount0) + amount0Delta);
-      amount1 = uint256(int256(amount1) + amount1Delta);
+      amount0 = uint256(int256(amount0) - amount0Delta);
+      amount1 = uint256(int256(amount1) - amount1Delta);
 
       // Add liquidity a second time
+      (sqrtRatioX96,,,,,,) = _currentPool.slot0();
       uint128 swapLiquidity = LiquidityAmounts.getLiquidityForAmounts(
         sqrtRatioX96,
         TickMath.getSqrtRatioAtTick(lowerTick),
@@ -217,10 +213,7 @@ console.log(amount1);
         amount0,
         amount1
       );
-console.logInt(amount0Delta);
-console.logInt(amount1Delta);
 
-console.log(swapLiquidity);
       _currentPool.mint(
         address(this),
         lowerTick,
@@ -228,7 +221,6 @@ console.log(swapLiquidity);
         swapLiquidity,
         abi.encode(address(this))
       );
-console.log('c');
     }
   }
 

@@ -23,6 +23,29 @@ contract SwapTest is IUniswapV3SwapCallback {
         );
     }
 
+    function washTrade(
+        address pool,
+        int256 amountSpecified,
+        uint256 numTrades,
+        uint256 ratio
+    )
+        external
+    {
+        for (uint i = 0; i < numTrades; i++) {
+            bool zeroForOne = i % ratio > 0;
+            (uint160 sqrtRatio, , , , , , ) = IUniswapV3Pool(pool).slot0();
+            IUniswapV3Pool(pool).swap(
+                address(0),
+                zeroForOne,
+                amountSpecified,
+                zeroForOne ? sqrtRatio - 1 : sqrtRatio + 1,
+                abi.encode(msg.sender)
+            );
+        }
+    }
+
+
+
     function getSwapResult(
         address pool,
         bool zeroForOne,
