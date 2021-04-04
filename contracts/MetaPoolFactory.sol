@@ -14,8 +14,11 @@ contract MetaPoolFactory is IMetaPoolFactory {
 
   bytes32 public constant POOL_BYTECODE_HASH = keccak256(type(MetaPool).creationCode);
 
+  address private _owner;
+
   constructor(address _uniswapFactory) {
     uniswapFactory = _uniswapFactory;
+    _owner = msg.sender;
   }
 
   function calculatePoolAddress(address tokenA, address tokenB) external view returns (address) {
@@ -42,6 +45,10 @@ contract MetaPoolFactory is IMetaPoolFactory {
     _token1 = address(0);
 
     emit PoolCreated(token0, token1, pool);
+  }
+
+  function owner() external view override returns (address) {
+    return _owner;
   }
 
   function getDeployProps() external view override returns (address, address, address) {

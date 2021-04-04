@@ -28,10 +28,11 @@ describe('MetaPools', function() {
   let metaPoolFactory;
   const nonExistantToken = '0x1111111111111111111111111111111111111111';
   let user0;
+  let user1;
   let swapTest;
 
   before(async function() {
-    ([user0] = await ethers.getSigners());
+    ([user0, user1] = await ethers.getSigners());
     
     const SwapTest = await ethers.getContractFactory('SwapTest');
     swapTest = await SwapTest.deploy();
@@ -135,6 +136,14 @@ describe('MetaPools', function() {
       });
     });
 
+    describe('adjustParams', function() {
+      it('should fail if not called by owner', async function() {
+        await expect(
+          metaPool.connect(user1).adjustParams(-443610, 443610, '3000')
+        ).to.be.reverted;
+      });
+    });
+
     describe('with liquidity depositted', function() {
       beforeEach(async function() {
         await metaPool.mint('10000');
@@ -169,6 +178,37 @@ describe('MetaPools', function() {
             expect(liquidity2).to.equal('10099');
           });
         });
+
+        describe('adjust params', function() {
+          it('should change the ticks and rebalance', async function() {
+            await metaPool.adjustParams(-443580, 443580, '3000');
+
+            await metaPool.rebalance();
+
+            const [liquidityOld] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidityOld).to.equal('0');
+
+            const [liquidityNew] = await uniswapPool.positions(position(metaPool.address, -443580, 443580));
+            expect(liquidityNew).to.equal('10098');
+          });
+
+          it('should change the fee & ticks and rebalance', async function() {
+            await uniswapFactory.createPool(token0.address, token1.address, 500);
+            const uniswapPoolAddress = await uniswapFactory.getPool(token0.address, token1.address, 500);
+            const pool2 = await ethers.getContractAt('IUniswapV3Pool', uniswapPoolAddress);
+            await pool2.initialize(encodePriceSqrt('1', '1'));
+
+            await metaPool.adjustParams(-443580, 443580, 500);
+
+            await metaPool.rebalance();
+
+            const [liquidityOld] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidityOld).to.equal('0');
+
+            const [liquidityNew] = await pool2.positions(position(metaPool.address, -443580, 443580));
+            expect(liquidityNew).to.equal('10098');
+          });
+        });
       });
 
       describe('after lots of unbalanced trading', function() {
@@ -187,6 +227,37 @@ describe('MetaPools', function() {
             expect(await token1.balanceOf(metaPool.address)).to.equal('0');
             const [liquidity2] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
             expect(liquidity2).to.equal('10097');
+          });
+        });
+
+        describe('adjust params', function() {
+          it('should change the ticks and rebalance', async function() {
+            await metaPool.adjustParams(-443580, 443580, '3000');
+
+            await metaPool.rebalance();
+
+            const [liquidityOld] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidityOld).to.equal('0');
+
+            const [liquidityNew] = await uniswapPool.positions(position(metaPool.address, -443580, 443580));
+            expect(liquidityNew).to.equal('10096');
+          });
+
+          it('should change the fee & ticks and rebalance', async function() {
+            await uniswapFactory.createPool(token0.address, token1.address, 500);
+            const uniswapPoolAddress = await uniswapFactory.getPool(token0.address, token1.address, 500);
+            const pool2 = await ethers.getContractAt('IUniswapV3Pool', uniswapPoolAddress);
+            await pool2.initialize(encodePriceSqrt('1', '1'));
+
+            await metaPool.adjustParams(-443580, 443580, 500);
+
+            await metaPool.rebalance();
+
+            const [liquidityOld] = await uniswapPool.positions(position(metaPool.address, -887220, 887220));
+            expect(liquidityOld).to.equal('0');
+
+            const [liquidityNew] = await pool2.positions(position(metaPool.address, -443580, 443580));
+            expect(liquidityNew).to.equal('10096');
           });
         });
       });

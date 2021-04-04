@@ -35,6 +35,8 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
   int24 private constant MIN_TICK = -887220;
   int24 private constant MAX_TICK = 887220;
 
+  event ParamsAdjusted(int24 newLowerTick, int24 newUpperTick, uint24 newUniswapFee);
+
   constructor() {
     IMetaPoolFactory _factory = IMetaPoolFactory(msg.sender);
     factory = _factory;
@@ -54,6 +56,12 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
     address uniswapPool = IUniswapV3Factory(_uniswapFactory).getPool(_token0, _token1, DEFAULT_UNISWAP_FEE);
     require(uniswapPool != address(0));
     currentPool = IUniswapV3Pool(uniswapPool);
+  }
+
+  function adjustParams(int24 newLowerTick, int24 newUpperTick, uint24 newUniswapFee) external {
+    require(msg.sender == factory.owner());
+    (nextLowerTick, nextUpperTick, nextUniswapFee) = (newLowerTick, newUpperTick, newUniswapFee);
+    emit ParamsAdjusted(newLowerTick, newUpperTick, newUniswapFee);
   }
 
   function mint(uint128 newLiquidity) external returns (uint256 mintAmount) {
@@ -150,6 +158,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
 
       deposit(newPool, _nextLowerTick, _nextUpperTick, collected0, collected1);
     } else if (_currentLowerTick != _nextLowerTick || _currentUpperTick != _nextUpperTick) {
+      // We're just adjusting ticks
       bytes32 positionID = keccak256(abi.encodePacked(address(this), _currentLowerTick, _currentUpperTick));
       (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
       (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, _liquidity, address(this));
