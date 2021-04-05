@@ -46,6 +46,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
     token1 = _token1;
     uniswapFactory = IUniswapV3Factory(_uniswapFactory);
 
+    // All metapools start with 0.30% fees & liquidity spread across the entire curve
     currentLowerTick = MIN_TICK;
     currentUpperTick = MAX_TICK;
     nextLowerTick = MIN_TICK;
@@ -119,6 +120,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
   }
 
   function rebalance() external {
+    // Read all this from storage to minimize SLOADs
     (
       IUniswapV3Pool _currentPool,
       int24 _currentLowerTick,
@@ -144,6 +146,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
       (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, _liquidity, address(this));
 
       IUniswapV3Pool newPool = IUniswapV3Pool(uniswapFactory.getPool(token0, token1, _nextUniswapFee));
+      // Store new paramaters as "current"
       (
         currentLowerTick,
         currentUpperTick,
@@ -163,6 +166,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
       (uint128 _liquidity,,,,) = _currentPool.positions(positionID);
       (uint256 collected0, uint256 collected1) = withdraw(_currentPool, _currentLowerTick, _currentUpperTick, _liquidity, address(this));
       
+      // Store new ticks
       (currentLowerTick, currentUpperTick) = (_nextLowerTick, _nextUpperTick);
       
       deposit(_currentPool, _nextLowerTick, _nextUpperTick, collected0, collected1);
@@ -199,6 +203,8 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
     amount0 -= amountDeposited0;
     amount1 -= amountDeposited1;
 
+    // If we still have some leftover, we need to swap so it's balanced
+    // This part is still a PoC, would need much more intelligent swapping
     if (amount0 > 0 || amount1 > 0) {
       // TODO: this is a hacky method that only works at somewhat-balanced pools
       bool zeroForOne = amount0 > amount1;
@@ -246,6 +252,7 @@ contract MetaPool is IUniswapV3MintCallback, IUniswapV3SwapCallback, ERC20 {
 
     (uint256 _owed0, uint256 _owed1) = _currentPool.burn(lowerTick, upperTick, liquidity);
 
+    // If we're withdrawing for a specific user, then we only want to withdraw what they're owed
     if (recipient != address(this)) {
       // TODO: can we trust Uniswap and safely cast here?
       requestAmount0 = uint128(_owed0);
